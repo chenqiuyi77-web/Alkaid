@@ -1,3 +1,8 @@
+/* 清除移动端点击时讨厌的蓝色高亮背景 */
+* {
+    -webkit-tap-highlight-color: transparent;
+}
+
 /* ================= 莫兰迪色系 & 主题 ================= */
 :root {
     --bg-color: #f0f4f8; --chat-bg: #ffffff; --text-color: #333333;
