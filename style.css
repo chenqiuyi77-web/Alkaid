@@ -83,11 +83,12 @@ main { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: 
     cursor: default; /* 覆盖bubble的pointer */
 }
 
+/* 适当加宽播放器整体宽度以容纳更长的语音条 */
 .voice-player {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: 160px;
+    width: 200px; /* 【修改点】：从 160px 增加到 200px，让整体更修长 */
     padding-top: 6px;
     border-top: 1px solid rgba(0,0,0,0.08);
     cursor: pointer; /* 播放器区域可点击 */
@@ -96,26 +97,34 @@ main { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: 
     border-top: 1px solid rgba(255,255,255,0.1);
 }
 
+/* 【修改点】：用纯 CSS 绘制等边三角形 */
 .voice-icon {
-    font-size: 20px;
+    /* 移除之前的 font-size，改用明确的宽高 */
+    width: 16px; 
+    height: 18px; /* 这个比例接近等边三角形 (高等于边长的 √3/2 approx 0.866) */
+    background-color: var(--you-text);
+    /* 使用 clip-path 裁切出一个向右的等边三角形 */
+    clip-path: polygon(0 0, 0 100%, 100% 50%);
     flex-shrink: 0;
-    transition: color 0.2s;
-    color: var(--you-text);
+    transition: background-color 0.2s; /* 注意：用 background-color 替代 color */
 }
 .voice-icon.playing {
-    color: var(--accent-color) !important;
+    background-color: var(--accent-color) !important;
 }
 
+/* 【修改点】：增加波浪容器的高度 */
 .voice-waveform {
     flex-grow: 1;
-    height: 24px;
+    height: 32px; /* 从 24px 增加到 32px，给拉长的波浪足够的垂直空间 */
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 3px; /* 增加一点点间距，让波浪更透气 */
 }
+
+/* 【修改点】：把基础语音条高度拉长 */
 .voice-waveform .wave {
     width: 3px;
-    height: 4px;
+    height: 6px; /* 基础高度从 4px 提升到 6px */
     border-radius: 2px;
     background-color: var(--accent-color);
     opacity: 0.3;
@@ -126,16 +135,21 @@ main { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: 
 .voice-player.playing .wave {
     animation-name: wave-animation;
 }
+
+/* 如果你想让整个波段更长（横向更宽），可以在HTML中添加第7、第8个wave元素，并在此处补充如下延迟： */
 .voice-waveform .wave:nth-child(1) { animation-delay: -1.1s; }
 .voice-waveform .wave:nth-child(2) { animation-delay: -0.9s; }
 .voice-waveform .wave:nth-child(3) { animation-delay: -0.7s; }
 .voice-waveform .wave:nth-child(4) { animation-delay: -0.5s; }
 .voice-waveform .wave:nth-child(5) { animation-delay: -0.3s; }
 .voice-waveform .wave:nth-child(6) { animation-delay: -0.1s; }
+/* .voice-waveform .wave:nth-child(7) { animation-delay: 0.1s; } */
+/* .voice-waveform .wave:nth-child(8) { animation-delay: 0.3s; } */
 
+/* 【修改点】：调整动画的拉伸比例，配合更高的容器 */
 @keyframes wave-animation {
     0%, 100% { transform: scaleY(1); }
-    50% { transform: scaleY(4); }
+    50% { transform: scaleY(4.5); } /* 最大高度变为 6px * 4.5 = 27px，在 32px 容器内呈现出很好的张力 */
 }
 
 .voice-duration {
