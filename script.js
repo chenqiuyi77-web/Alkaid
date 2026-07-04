@@ -641,9 +641,9 @@ function appendDOMOnly(id, sender, type, content, quote = null, timestamp = null
         innerHTML += `
             <span>${content.text}</span>
             <div class="voice-player" onclick="togglePlayAudio(event, '${id}')">
-                <span class="voice-icon">►</span>
+                <span class="voice-icon"></span>
                 <div class="voice-waveform">
-                    ${Array(6).fill('<div class="wave"></div>').join('')}
+                    ${Array(12).fill('<div class="wave"></div>').join('')}
                 </div>
                 <span class="voice-duration">${content.duration}</span>
             </div>
