@@ -83,18 +83,18 @@ main { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: 
     cursor: default; /* 覆盖bubble的pointer */
 }
 
-/* 修改点：给播放器加入弹性设定 */
 .voice-player {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: 100%;             /* 撑满外层气泡允许的可用宽度 */
-    min-width: 180px;        /* 保证一个最基础的宽度 */
-    max-width: 200px;        /* 限制最大不突破 320px */
+    /* 【注意】：删除了之前所有的 width、min-width、max-width 设置 */
     padding-top: 6px;
-    border-top: 1px solid rgba(0,0,0,0.08);
+    border-top: 1px solid rgba(0,0,0,0.08); /* 横线现在绝对不会飞出去了 */
     cursor: pointer;
-    box-sizing: border-box;  /* 防止 padding 把容器撑破 */
+}
+/* 适配黑暗模式 */
+[data-theme="dark"] .voice-player {
+    border-top: 1px solid rgba(255,255,255,0.1);
 }
 
 /* 【修改点】：用纯 CSS 绘制等边三角形 */
@@ -112,15 +112,17 @@ main { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: 
     background-color: var(--accent-color) !important;
 }
 
-/* 【修改点】：增加波浪容器的高度 */
+/* 修改点2：利用弹性收缩魔法，保证波浪永远是听话的一方 */
 .voice-waveform {
-    flex-grow: 1;
-    height: 32px; /* 从 24px 增加到 32px，给拉长的波浪足够的垂直空间 */
+    flex-grow: 1; 
+    height: 32px;
     display: flex;
     align-items: center;
-    gap: 3px; /* 增加一点点间距，让波浪更透气 */
-    overflow: hidden;        /* 【核心在此】：装不下的波浪直接隐藏，绝不挤压旁边的数字 */
-    justify-content: flex-start; 
+    gap: 3px;
+    /* 【最核心的修复魔法👇】 */
+    min-width: 0;         /* 强制波浪容器可以无限度收缩，绝不向外撑破页面 */
+    overflow: hidden;     /* 装不下的多余波浪（比如最右边的第 23、24 根）温柔地剪裁隐藏 */
+    justify-content: flex-start; /* 永远靠左对齐波浪 */
 }
 
 /* 【修改点】：把基础语音条高度拉长 */
