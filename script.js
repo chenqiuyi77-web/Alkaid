@@ -542,40 +542,191 @@ function clearHistory() {
     }
 }
 
-// ================= 导出/导入数据逻辑 =================
-function exportData() {
-    const data = JSON.stringify(localStorage);
-    const blob = new Blob([data], {type: "application/json"});
+// ================= 导出/导入数据逻辑 (现代化分离架构版) =================
+
+// 辅助工具：提取超长媒体Base64字符串，防止单JSON文件过大导致解析崩溃
+const BackupUtils = {
+    isMedia: (s) => typeof s === 'string' && s.length > 500 && /^data:(image|video)\//i.test(s),
+    extractMedia: (node, state) => {
+        if (!state) state = { store: {}, map: new Map(), n: 0 };
+        if (node === null || node === undefined) return node;
+        if (typeof node === 'string') {
+            if (BackupUtils.isMedia(node)) {
+                let id = state.map.get(node);
+                if (!id) {
+                    id = 'm' + state.n++;
+                    state.map.set(node, id);
+                    state.store[id] = node;
+                }
+                return { __mRef: id };
+            }
+            return node;
+        }
+        if (Array.isArray(node)) return node.map(x => BackupUtils.extractMedia(x, state));
+        if (typeof node === 'object') {
+            let out = {};
+            for (let k in node) out[k] = BackupUtils.extractMedia(node[k], state);
+            return out;
+        }
+        return node;
+    },
+    inlineMedia: (node, store) => { // 还原媒体引用
+        if (!store) store = {};
+        if (node === null || node === undefined) return node;
+        if (typeof node === 'object' && !Array.isArray(node) && node.__mRef) {
+            return store[node.__mRef] !== undefined ? store[node.__mRef] : node;
+        }
+        if (Array.isArray(node)) return node.map(x => BackupUtils.inlineMedia(x, store));
+        if (typeof node === 'object') {
+            let o = {};
+            for (let k in node) o[k] = BackupUtils.inlineMedia(node[k], store);
+            return o;
+        }
+        return node;
+    },
+    dataUrlToBinary: (dataUrl) => { // Base64 转二进制 Uint8Array 存ZIP用
+        const m = /^data:([^,]+),([\s\S]*)$/.exec(dataUrl);
+        if(!m) return null;
+        try {
+            const binary = atob(m[2].replace(/\s/g, ''));
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            return { mime: m[1].split(';')[0].trim(), bytes };
+        } catch(e) { return null; }
+    }
+};
+
+async function exportData() {
+    const backupBtn = document.getElementById('export-btn'); // 假设您有这个按钮
+    if (backupBtn) backupBtn.innerText = "数据打包中...";
+    
+    try {
+        // 第一阶段：读取全部 localStorage，将 JSON 转对象
+        let lsData = {};
+        for (let j = 0; j < localStorage.length; j++) {
+            let key = localStorage.key(j);
+            let val = localStorage.getItem(key);
+            try { lsData[key] = JSON.parse(val); } // 尝试解析 JSON 
+            catch(e) { lsData[key] = val; } // 字符串/纯文本直接保留
+        }
+
+        // 第二阶段：提取全部图片基底，极大地压缩主 JSON 体积
+        let state = { store: {}, map: new Map(), n: 0 };
+        let processedLs = BackupUtils.extractMedia(lsData, state);
+        
+        let payload = {
+            type: 'chatapp-backup-v4',
+            timestamp: new Date().toISOString(),
+            localStorage: processedLs,
+            mediaStore: state.store // 分离出的图库
+        };
+
+        const dateStr = new Date().toLocaleDateString().replace(/\//g, '-');
+        
+        // 第三阶段：如果网页引入了 JSZip，则导出 ZIP 压缩包；否则降级为紧凑 JSON
+        if (typeof JSZip !== 'undefined') {
+            const zip = new JSZip();
+            let mediaIndex = {};
+            for (let id in payload.mediaStore) {
+                let bin = BackupUtils.dataUrlToBinary(payload.mediaStore[id]);
+                if (bin) {
+                    zip.file(`media/${id}`, bin.bytes, { binary: true });
+                    mediaIndex[id] = { mime: bin.mime };
+                }
+            }
+            // 清理原存储中的冗余长字符串，只留下索引
+            delete payload.mediaStore; 
+            payload.mediaIndex = mediaIndex;
+            zip.file('backup.json', JSON.stringify(payload));
+            
+            const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+            downloadFile(blob, `摇光_${dateStr}.zip`);
+        } else {
+            // 降级为单 JSON 的下载方式
+            const str = JSON.stringify(payload);
+            const blob = new Blob([str], {type: "application/json;charset=utf-8"});
+            downloadFile(blob, `摇光_${dateStr}.json`);
+        }
+        alert("宝宝，数据导出成功啦！妥妥的保存好哦~");
+    } catch (err) {
+        console.error(err);
+        alert("打包出现了一点小问题，请刷新后再试一次吧宝宝。");
+    } finally {
+        if (backupBtn) backupBtn.innerText = "导出备份";
+    }
+}
+
+function downloadFile(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const dateStr = new Date().toLocaleDateString().replace(/\//g, '-');
-    a.download = `摇光_${dateStr}.json`;
+    a.download = filename;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-function importData(event) {
+async function importData(event) {
     const file = event.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const data = JSON.parse(e.target.result);
-            if (confirm("导入数据将覆盖当前的所有聊天记录、设置和表情包哦！确定要继续吗宝宝？")) {
-                localStorage.clear(); 
-                for (let key in data) {
-                    localStorage.setItem(key, data[key]);
-                }
-                alert("导入成功啦！页面即将刷新以加载新数据~");
-                location.reload();
+
+    if (!confirm("导入数据将覆盖当前的所有聊天记录、设置和表情包哦！确定要继续吗宝宝？")) {
+        event.target.value = ''; return;
+    }
+
+    try {
+        let finalData = {};
+        
+        // 分支处理：读取 ZIP
+        if (file.name.endsWith('.zip')) {
+            if (typeof JSZip === 'undefined') throw new Error("缺少 ZIP 解析库");
+            const zip = await JSZip.loadAsync(file);
+            let jsonRaw = await zip.file('backup.json').async('string');
+            let parsed = JSON.parse(jsonRaw);
+            
+            // 将 ZIP 中的 media 二进制还原合并
+            if (parsed.mediaIndex) {
+               parsed.mediaStore = {};
+               for (let id in parsed.mediaIndex) {
+                   const zf = zip.file(`media/${id}`);
+                   if(zf) {
+                       const ab = await zf.async('arraybuffer');
+                       parsed.mediaStore[id] = 'data:' + parsed.mediaIndex[id].mime + ';base64,' + 
+                           btoa(String.fromCharCode(...new Uint8Array(ab)));
+                   }
+               }
             }
-        } catch(err) {
-            alert("导入失败了呜呜，请检查是不是正确的备份文件哦。");
+            finalData = parsed;
+        } else {
+            // 分支处理：读取普通的 JSON
+            let text = await file.text();
+            finalData = JSON.parse(text);
         }
-    };
-    reader.readAsText(file);
-    event.target.value = ''; 
+
+        localStorage.clear();
+        
+        // 核心：判定是新架构格式还是老备份格式
+        if (finalData.type && finalData.type.startsWith('chatapp-backup')) {
+            // 新版架构：还原图片依赖替换
+            let restoredLs = BackupUtils.inlineMedia(finalData.localStorage, finalData.mediaStore);
+            for (let key in restoredLs) {
+                let val = restoredLs[key];
+                localStorage.setItem(key, typeof val === 'object' ? JSON.stringify(val) : val);
+            }
+        } else {
+            // 旧版直导备份：原样写入
+            for (let key in finalData) {
+                localStorage.setItem(key, finalData[key]);
+            }
+        }
+        
+        alert("导入成功啦！页面即将刷新以加载那些美好的新数据~");
+        location.reload();
+    } catch(err) {
+        console.error(err);
+        alert("导入失败了呜呜，可能是文件损坏或者不支持该格式哦。");
+    } finally {
+        event.target.value = ''; 
+    }
 }
 
 // ================= 长按与上下文菜单 =================
