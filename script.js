@@ -544,9 +544,12 @@ function clearHistory() {
 
 // ================= 导出/导入数据逻辑 (现代化分离架构版) =================
 
-// 辅助工具：提取超长媒体Base64字符串，防止单JSON文件过大导致解析崩溃
+// 辅助工具：非阻塞的延迟函数，用于把主线程还给浏览器渲染 UI
+const yieldThread = () => new Promise(resolve => setTimeout(resolve, 10));
+
 const BackupUtils = {
     isMedia: (s) => typeof s === 'string' && s.length > 500 && /^data:(image|video)\//i.test(s),
+    
     extractMedia: (node, state) => {
         if (!state) state = { store: {}, map: new Map(), n: 0 };
         if (node === null || node === undefined) return node;
@@ -570,7 +573,8 @@ const BackupUtils = {
         }
         return node;
     },
-    inlineMedia: (node, store) => { // 还原媒体引用
+    
+    inlineMedia: (node, store) => { // 还原媒体引用 (导入时需要用到这部分，保持不变)
         if (!store) store = {};
         if (node === null || node === undefined) return node;
         if (typeof node === 'object' && !Array.isArray(node) && node.__mRef) {
@@ -584,7 +588,8 @@ const BackupUtils = {
         }
         return node;
     },
-    dataUrlToBinary: (dataUrl) => { // Base64 转二进制 Uint8Array 存ZIP用
+
+    dataUrlToBinary: (dataUrl) => {
         const m = /^data:([^,]+),([\s\S]*)$/.exec(dataUrl);
         if(!m) return null;
         try {
@@ -597,20 +602,31 @@ const BackupUtils = {
 };
 
 async function exportData() {
-    const backupBtn = document.getElementById('export-btn'); // 假设您有这个按钮
-    if (backupBtn) backupBtn.innerText = "数据打包中...";
+    const backupBtn = document.getElementById('export-btn'); 
     
     try {
-        // 第一阶段：读取全部 localStorage，将 JSON 转对象
+        if (backupBtn) backupBtn.innerText = "准备环境...";
+        await yieldThread(); 
+
         let lsData = {};
-        for (let j = 0; j < localStorage.length; j++) {
-            let key = localStorage.key(j);
+        const keys = Object.keys(localStorage);
+        const totalKeys = keys.length;
+        
+        for (let j = 0; j < totalKeys; j++) {
+            let key = keys[j];
             let val = localStorage.getItem(key);
-            try { lsData[key] = JSON.parse(val); } // 尝试解析 JSON 
-            catch(e) { lsData[key] = val; } // 字符串/纯文本直接保留
+            try { lsData[key] = JSON.parse(val); } 
+            catch(e) { lsData[key] = val; }
+            
+            if (j % 5 === 0) {
+                if (backupBtn) backupBtn.innerText = `读取数据... ${Math.round((j / totalKeys) * 100)}%`;
+                await yieldThread(); 
+            }
         }
 
-        // 第二阶段：提取全部图片基底，极大地压缩主 JSON 体积
+        if (backupBtn) backupBtn.innerText = "压缩媒体文件中...";
+        await yieldThread();
+        
         let state = { store: {}, map: new Map(), n: 0 };
         let processedLs = BackupUtils.extractMedia(lsData, state);
         
@@ -618,38 +634,55 @@ async function exportData() {
             type: 'chatapp-backup-v4',
             timestamp: new Date().toISOString(),
             localStorage: processedLs,
-            mediaStore: state.store // 分离出的图库
+            mediaStore: state.store
         };
 
         const dateStr = new Date().toLocaleDateString().replace(/\//g, '-');
         
-        // 第三阶段：如果网页引入了 JSZip，则导出 ZIP 压缩包；否则降级为紧凑 JSON
         if (typeof JSZip !== 'undefined') {
             const zip = new JSZip();
             let mediaIndex = {};
-            for (let id in payload.mediaStore) {
+            let mediaIds = Object.keys(payload.mediaStore);
+            
+            for (let i = 0; i < mediaIds.length; i++) {
+                let id = mediaIds[i];
                 let bin = BackupUtils.dataUrlToBinary(payload.mediaStore[id]);
                 if (bin) {
                     zip.file(`media/${id}`, bin.bytes, { binary: true });
                     mediaIndex[id] = { mime: bin.mime };
                 }
+                if (i % 10 === 0) {
+                    if (backupBtn) backupBtn.innerText = `打包图片... ${Math.round((i / mediaIds.length) * 100)}%`;
+                    await yieldThread(); 
+                }
             }
-            // 清理原存储中的冗余长字符串，只留下索引
+            
             delete payload.mediaStore; 
             payload.mediaIndex = mediaIndex;
             zip.file('backup.json', JSON.stringify(payload));
             
-            const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+            if (backupBtn) backupBtn.innerText = "生成压缩包...";
+            await yieldThread();
+
+            const blob = await zip.generateAsync({ 
+                type: 'blob', 
+                compression: 'DEFLATE',
+                }, function updateCallback(metadata) {
+                    if (backupBtn) backupBtn.innerText = `压缩中: ${metadata.percent.toFixed(0)}%`;
+            });
+            
             downloadFile(blob, `摇光_${dateStr}.zip`);
         } else {
-            // 降级为单 JSON 的下载方式
+            if (backupBtn) backupBtn.innerText = "生成 JSON 文件...";
+            await yieldThread();
             const str = JSON.stringify(payload);
             const blob = new Blob([str], {type: "application/json;charset=utf-8"});
             downloadFile(blob, `摇光_${dateStr}.json`);
         }
+        
         alert("宝宝，数据导出成功啦！妥妥的保存好哦~");
     } catch (err) {
-        console.error(err);
+        console.error("导出异常：", err);
         alert("打包出现了一点小问题，请刷新后再试一次吧宝宝。");
     } finally {
         if (backupBtn) backupBtn.innerText = "导出备份";
