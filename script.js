@@ -589,17 +589,26 @@ const BackupUtils = {
         return node;
     },
 
-    dataUrlToBinary: (dataUrl) => {
-        const m = /^data:([^,]+),([\s\S]*)$/.exec(dataUrl);
-        if(!m) return null;
+        dataUrlToBinary: (dataUrl) => {
         try {
-            const binary = atob(m[2].replace(/\s/g, ''));
+            const commaIdx = dataUrl.indexOf(',');
+            if (commaIdx === -1) return null;
+            
+            // 使用 indexOf 字符串截取，避开正则表达式匹配超大文本的性能灾难
+            const header = dataUrl.substring(0, commaIdx);
+            const mime = header.split(':')[1].split(';')[0].trim();
+            const base64Body = dataUrl.substring(commaIdx + 1).replace(/\s/g, ''); // 去除可能存在的换行/空格
+            
+            const binary = atob(base64Body);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            return { mime: m[1].split(';')[0].trim(), bytes };
-        } catch(e) { return null; }
+            
+            return { mime, bytes };
+        } catch(e) { 
+            return null; 
+        }
     }
-};
+
 
 async function exportData() {
     const backupBtn = document.getElementById('export-btn'); 
@@ -618,7 +627,7 @@ async function exportData() {
             try { lsData[key] = JSON.parse(val); } 
             catch(e) { lsData[key] = val; }
             
-            if (j % 5 === 0) {
+            if (j % 50 === 0) {
                 if (backupBtn) backupBtn.innerText = `读取数据... ${Math.round((j / totalKeys) * 100)}%`;
                 await yieldThread(); 
             }
@@ -651,7 +660,7 @@ async function exportData() {
                     zip.file(`media/${id}`, bin.bytes, { binary: true });
                     mediaIndex[id] = { mime: bin.mime };
                 }
-                if (i % 10 === 0) {
+                if (i % 50 === 0) {
                     if (backupBtn) backupBtn.innerText = `打包图片... ${Math.round((i / mediaIds.length) * 100)}%`;
                     await yieldThread(); 
                 }
