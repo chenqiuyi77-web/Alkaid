@@ -144,7 +144,11 @@ main { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: 
 .voice-waveform .wave:nth-child(5) { animation-delay: -0.3s; }
 .voice-waveform .wave:nth-child(6) { animation-delay: -0.1s; }
 .voice-waveform .wave:nth-child(7) { animation-delay: 0.1s; } 
-.voice-waveform .wave:nth-child(8) { animation-delay: 0.3s; } 
+.voice-waveform .wave:nth-child(8) { animation-delay: 0.3s; }
+.voice-waveform .wave:nth-child(9) { animation-delay: 0.5s; }
+.voice-waveform .wave:nth-child(10) { animation-delay: 0.7s; }
+.voice-waveform .wave:nth-child(11) { animation-delay: 0.9s; }
+.voice-waveform .wave:nth-child(12) { animation-delay: 1.1s; }
 
 /* 【修改点】：调整动画的拉伸比例，配合更高的容器 */
 @keyframes wave-animation {
