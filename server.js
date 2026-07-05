@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 319;
+const PORT = process.env.PORT || 3190;
 
 // 中间件
 app.use(cors());
@@ -113,5 +113,5 @@ app.listen(PORT, () => {
     console.log('Alkaid 后端服务已启动');
     console.log(`地址: http://localhost:${PORT}`);
     console.log(`数据存储: ${DATA_DIR}`);
-    console.log('前端需要配置 API_BASE_URL 为 http://localhost:319');
+    console.log('前端需要配置 API_BASE_URL 为 http://localhost:3190');
 });
