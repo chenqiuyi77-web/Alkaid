@@ -1,3 +1,46 @@
+// ================= 后端配置 =================
+const API_BASE_URL = 'http://localhost:319';
+const USER_ID = 'default-user';
+
+// 带降级的保存函数
+async function saveToBackend(key, value) {
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/load/${USER_ID}`);
+        const result = await res.json();
+        const allData = result.data || {};
+        allData[key] = value;
+        await fetch(`${API_BASE_URL}/api/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: USER_ID, data: allData })
+        });
+        localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+        return true;
+    } catch (error) {
+        console.warn('⚠️ 后端保存失败，降级到 localStorage:', error);
+        localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+        return false;
+    }
+}
+
+async function loadFromBackend(key) {
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/load/${USER_ID}`);
+        const result = await res.json();
+        const allData = result.data || {};
+        if (allData[key] !== undefined) {
+            const val = allData[key];
+            localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val));
+            return val;
+        }
+        return null;
+    } catch (error) {
+        console.warn('⚠️ 后端加载失败，从 localStorage 读取:', error);
+        const localVal = localStorage.getItem(key);
+        try { return JSON.parse(localVal); } catch { return localVal; }
+    }
+}
+
 const chatWindow = document.getElementById('chat-window');
 const msgInput = document.getElementById('msg-input');
 const catSelect = document.getElementById('cat-select');
@@ -5,89 +48,165 @@ const replyTextarea = document.getElementById('reply-library');
 const statusDot = document.getElementById('status-dot');
 
 // ================= 核心状态数据 =================
-let chatHistory = JSON.parse(localStorage.getItem('chatHistoryDB')) || [];
-let replyMode = localStorage.getItem('replyMode') || 'mixed'; 
-let replyLibrary = JSON.parse(localStorage.getItem('replyLibraryDB')) || { "默认分类": "想你啦\n早点休息\n我一直都在\n抱抱\n乖" };
-let currentCategory = Object.keys(replyLibrary)[0] || "默认分类";
-let myStickers = JSON.parse(localStorage.getItem('myStickers')) || [];
-let youStickers = JSON.parse(localStorage.getItem('youStickers')) || [];
-let isBotReplying = false; 
+let chatHistory = [];
+let replyMode = 'mixed';
+let replyLibrary = { "默认分类": "想你啦\n早点休息\n我一直都在\n抱抱\n乖" };
+let currentCategory = "默认分类";
+let myStickers = [];
+let youStickers = [];
+let isBotReplying = false;
 
-let voiceLibrary = JSON.parse(localStorage.getItem('voiceLibraryDB')) || { "默认语音": [] };
-let currentVoiceCategory = Object.keys(voiceLibrary)[0] || "默认语音";
+let voiceLibrary = { "默认语音": [] };
+let currentVoiceCategory = "默认语音";
 let globalAudioPlayer = new Audio();
 let currentlyPlayingAudio = { id: null, playerElement: null };
 
-let statusLibrary = JSON.parse(localStorage.getItem('statusLibraryDB')) || { "日常状态": "发呆中\n正在看书\n喝咖啡\n好想你\n有点困" };
-let currentStatusCategory = Object.keys(statusLibrary)[0] || "日常状态";
-let currentStatusText = localStorage.getItem('currentStatusText') || "发呆中...";
-let nextStatusUpdateTime = parseInt(localStorage.getItem('nextStatusUpdateTime')) || 0;
+let statusLibrary = { "日常状态": "发呆中\n正在看书\n喝咖啡\n好想你\n有点困" };
+let currentStatusCategory = "日常状态";
+let currentStatusText = "发呆中...";
+let nextStatusUpdateTime = 0;
 
-let rhythmSettings = JSON.parse(localStorage.getItem('rhythmSettings')) || {
+let rhythmSettings = {
     minWait: 2, maxWait: 5, proactive: false, proactiveInterval: 15, mixEmoji: false, showTimestamp: false, randomReadState: false
 };
-let proactiveTimer = null; 
+let proactiveTimer = null;
 
-let tickleSettings = JSON.parse(localStorage.getItem('tickleSettings')) || {
+let tickleSettings = {
     myAction: "拍了拍", mySuffix: "", youAction: "拍了拍", youSuffix: ""
 };
 
-let letterHistory = JSON.parse(localStorage.getItem('letterHistoryDB')) || [];
+let letterHistory = [];
 
-let currentQuoteText = null; 
+let currentQuoteText = null;
 let selectedMsgIdForContext = null;
 let pressTimer = null;
 
-window.onload = () => {
+// ================= 从后端加载所有数据 =================
+async function loadAllData() {
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/load/${USER_ID}`);
+        const result = await res.json();
+        const data = result.data || {};
+
+        chatHistory = data.chatHistoryDB || [];
+        replyMode = data.replyMode || 'mixed';
+        replyLibrary = data.replyLibraryDB || { "默认分类": "想你啦\n早点休息\n我一直都在\n抱抱\n乖" };
+        currentCategory = Object.keys(replyLibrary)[0] || "默认分类";
+        myStickers = data.myStickers || [];
+        youStickers = data.youStickers || [];
+        voiceLibrary = data.voiceLibraryDB || { "默认语音": [] };
+        currentVoiceCategory = Object.keys(voiceLibrary)[0] || "默认语音";
+        statusLibrary = data.statusLibraryDB || { "日常状态": "发呆中\n正在看书\n喝咖啡\n好想你\n有点困" };
+        currentStatusCategory = Object.keys(statusLibrary)[0] || "日常状态";
+        currentStatusText = data.currentStatusText || "发呆中...";
+        nextStatusUpdateTime = data.nextStatusUpdateTime || 0;
+        rhythmSettings = data.rhythmSettings || {
+            minWait: 2, maxWait: 5, proactive: false, proactiveInterval: 15, mixEmoji: false, showTimestamp: false, randomReadState: false
+        };
+        tickleSettings = data.tickleSettings || {
+            myAction: "拍了拍", mySuffix: "", youAction: "拍了拍", youSuffix: ""
+        };
+        letterHistory = data.letterHistoryDB || [];
+
+        syncToLocalStorage(data);
+        console.log('✅ 数据从后端加载成功');
+        return true;
+    } catch (error) {
+        console.warn('⚠️ 从后端加载失败，从 localStorage 加载:', error);
+        loadFromLocalStorage();
+        return false;
+    }
+}
+
+function syncToLocalStorage(data) {
+    const keys = ['chatHistoryDB', 'replyMode', 'replyLibraryDB', 'myStickers', 'youStickers',
+        'voiceLibraryDB', 'statusLibraryDB', 'currentStatusText', 'nextStatusUpdateTime',
+        'rhythmSettings', 'tickleSettings', 'letterHistoryDB'
+    ];
+    keys.forEach(key => {
+        if (data[key] !== undefined) {
+            localStorage.setItem(key, typeof data[key] === 'string' ? data[key] : JSON.stringify(data[key]));
+        }
+    });
+}
+
+function loadFromLocalStorage() {
+    chatHistory = JSON.parse(localStorage.getItem('chatHistoryDB')) || [];
+    replyMode = localStorage.getItem('replyMode') || 'mixed';
+    replyLibrary = JSON.parse(localStorage.getItem('replyLibraryDB')) || { "默认分类": "想你啦\n早点休息\n我一直都在\n抱抱\n乖" };
+    currentCategory = Object.keys(replyLibrary)[0] || "默认分类";
+    myStickers = JSON.parse(localStorage.getItem('myStickers')) || [];
+    youStickers = JSON.parse(localStorage.getItem('youStickers')) || [];
+    voiceLibrary = JSON.parse(localStorage.getItem('voiceLibraryDB')) || { "默认语音": [] };
+    currentVoiceCategory = Object.keys(voiceLibrary)[0] || "默认语音";
+    statusLibrary = JSON.parse(localStorage.getItem('statusLibraryDB')) || { "日常状态": "发呆中\n正在看书\n喝咖啡\n好想你\n有点困" };
+    currentStatusCategory = Object.keys(statusLibrary)[0] || "日常状态";
+    currentStatusText = localStorage.getItem('currentStatusText') || "发呆中...";
+    nextStatusUpdateTime = parseInt(localStorage.getItem('nextStatusUpdateTime')) || 0;
+    rhythmSettings = JSON.parse(localStorage.getItem('rhythmSettings')) || {
+        minWait: 2, maxWait: 5, proactive: false, proactiveInterval: 15, mixEmoji: false, showTimestamp: false, randomReadState: false
+    };
+    tickleSettings = JSON.parse(localStorage.getItem('tickleSettings')) || {
+        myAction: "拍了拍", mySuffix: "", youAction: "拍了拍", youSuffix: ""
+    };
+    letterHistory = JSON.parse(localStorage.getItem('letterHistoryDB')) || [];
+}
+
+window.onload = async () => {
+    await loadAllData();
+
     const savedTheme = localStorage.getItem('theme') || 'default';
     document.documentElement.setAttribute('data-theme', savedTheme);
 
     const savedWallpaper = localStorage.getItem('chatWallpaper');
-    if(savedWallpaper) document.getElementById('app').style.backgroundImage = `url('${savedWallpaper}')`;
+    if (savedWallpaper) document.getElementById('app').style.backgroundImage = `url('${savedWallpaper}')`;
 
     const savedName = localStorage.getItem('partnerName');
-    if(savedName) updatePartnerNameDisplay(savedName);
-    
+    if (savedName) updatePartnerNameDisplay(savedName);
+
     document.getElementById('reply-mode-select').value = replyMode;
-    
+
     const savedMeAvatar = localStorage.getItem('myAvatar');
-    if(savedMeAvatar) document.documentElement.style.setProperty('--me-avatar', savedMeAvatar);
+    if (savedMeAvatar) document.documentElement.style.setProperty('--me-avatar', savedMeAvatar);
     const savedYouAvatar = localStorage.getItem('youAvatar');
-    if(savedYouAvatar) document.documentElement.style.setProperty('--you-avatar', savedYouAvatar);
+    if (savedYouAvatar) document.documentElement.style.setProperty('--you-avatar', savedYouAvatar);
 
     initRhythmUI();
     initTickleUI();
     renderCategorySelect();
-    renderVoiceCategorySelect(); 
-    renderStatusCategorySelect(); 
-    checkAndUpdateStatus(); 
-    setInterval(checkAndUpdateStatus, 60000); 
+    renderVoiceCategorySelect();
+    renderStatusCategorySelect();
+    checkAndUpdateStatus();
+    setInterval(checkAndUpdateStatus, 60000);
     renderStickers();
     renderChatHistory();
-    
+
     window.visualViewport.addEventListener("resize", () => {
         setTimeout(() => { chatWindow.scrollTop = chatWindow.scrollHeight; }, 100);
     });
-    
+
     globalAudioPlayer.addEventListener('ended', stopAudioPlayback);
 }
 
-// ================= 语音功能及语音库管理 (已更新) =================
+// ================= 语音功能及语音库管理 =================
 const voiceCatSelect = document.getElementById('voice-cat-select');
 const voiceListDiv = document.getElementById('voice-list');
 
 function renderVoiceCategorySelect() {
     voiceCatSelect.innerHTML = '';
-    for(let cat in voiceLibrary) {
-        let opt = document.createElement('option'); opt.value = cat; opt.innerText = cat; voiceCatSelect.appendChild(opt);
+    for (let cat in voiceLibrary) {
+        let opt = document.createElement('option');
+        opt.value = cat;
+        opt.innerText = cat;
+        voiceCatSelect.appendChild(opt);
     }
     voiceCatSelect.value = currentVoiceCategory;
     renderVoiceList();
 }
 
-function switchVoiceCategory() { 
-    currentVoiceCategory = voiceCatSelect.value; 
-    renderVoiceList(); 
+function switchVoiceCategory() {
+    currentVoiceCategory = voiceCatSelect.value;
+    renderVoiceList();
 }
 
 function renderVoiceList() {
@@ -107,14 +226,14 @@ function renderVoiceList() {
 
 function addNewVoiceCategory() {
     const newCat = prompt("请输入新语音分类名称：");
-    if(newCat && newCat.trim() !== "") {
-        if(!voiceLibrary[newCat.trim()]) { 
-            voiceLibrary[newCat.trim()] = []; 
-            currentVoiceCategory = newCat.trim(); 
-            localStorage.setItem('voiceLibraryDB', JSON.stringify(voiceLibrary));
-            renderVoiceCategorySelect(); 
-        } else { 
-            alert("分类已存在啦宝宝！"); 
+    if (newCat && newCat.trim() !== "") {
+        if (!voiceLibrary[newCat.trim()]) {
+            voiceLibrary[newCat.trim()] = [];
+            currentVoiceCategory = newCat.trim();
+            saveToBackend('voiceLibraryDB', voiceLibrary);
+            renderVoiceCategorySelect();
+        } else {
+            alert("分类已存在啦宝宝！");
         }
     }
 }
@@ -122,9 +241,9 @@ function addNewVoiceCategory() {
 function deleteVoiceCategory() {
     if (Object.keys(voiceLibrary).length <= 1) { alert("请至少保留一个语音分类哦宝宝！"); return; }
     if (confirm(`确定要删除【${currentVoiceCategory}】语音分类吗？`)) {
-        delete voiceLibrary[currentVoiceCategory]; 
-        localStorage.setItem('voiceLibraryDB', JSON.stringify(voiceLibrary));
-        currentVoiceCategory = Object.keys(voiceLibrary)[0]; 
+        delete voiceLibrary[currentVoiceCategory];
+        saveToBackend('voiceLibraryDB', voiceLibrary);
+        currentVoiceCategory = Object.keys(voiceLibrary)[0];
         renderVoiceCategorySelect();
     }
 }
@@ -155,7 +274,7 @@ function uploadVoice(event) {
             voiceLibrary[currentVoiceCategory] = [];
         }
         voiceLibrary[currentVoiceCategory].push(newVoice);
-        localStorage.setItem('voiceLibraryDB', JSON.stringify(voiceLibrary));
+        saveToBackend('voiceLibraryDB', voiceLibrary);
         renderVoiceList();
         alert("语音和文字都保存好啦！");
     };
@@ -166,20 +285,20 @@ function uploadVoice(event) {
 function deleteVoice(index) {
     if (confirm("确定要删除这条语音和文字吗？")) {
         voiceLibrary[currentVoiceCategory].splice(index, 1);
-        localStorage.setItem('voiceLibraryDB', JSON.stringify(voiceLibrary));
+        saveToBackend('voiceLibraryDB', voiceLibrary);
         renderVoiceList();
     }
 }
 
 function togglePlayAudio(event, msgId) {
     event.stopPropagation();
-    const playerElement = event.currentTarget; 
+    const playerElement = event.currentTarget;
     const msg = chatHistory.find(m => m.id === msgId);
     if (!playerElement || !msg || msg.type !== 'voice') return;
 
     const voiceData = msg.content.data;
     if (!voiceData) return;
-    
+
     if (currentlyPlayingAudio.id === msgId && !globalAudioPlayer.paused) {
         globalAudioPlayer.pause();
         playerElement.classList.remove('playing');
@@ -187,7 +306,7 @@ function togglePlayAudio(event, msgId) {
         if (currentlyPlayingAudio.playerElement) {
             currentlyPlayingAudio.playerElement.classList.remove('playing');
         }
-        
+
         currentlyPlayingAudio = { id: msgId, playerElement: playerElement };
         globalAudioPlayer.src = voiceData;
         globalAudioPlayer.play();
@@ -207,7 +326,7 @@ function toggleStatusPopup(event) {
     event.stopPropagation();
     const popup = document.getElementById('status-popup');
     const textEl = document.getElementById('status-popup-text');
-    
+
     if (popup.style.display === 'block') {
         popup.style.display = 'none';
     } else {
@@ -215,6 +334,7 @@ function toggleStatusPopup(event) {
         popup.style.display = 'block';
     }
 }
+
 function hideStatusPopup() {
     document.getElementById('status-popup').style.display = 'none';
 }
@@ -228,19 +348,19 @@ function checkAndUpdateStatus() {
         } else {
             const randomCat = categories[Math.floor(Math.random() * categories.length)];
             const phrases = statusLibrary[randomCat].split(/\n/).filter(p => p.trim() !== '');
-            
+
             if (phrases.length > 0) {
                 currentStatusText = phrases[Math.floor(Math.random() * phrases.length)].trim();
             } else {
                 currentStatusText = "发呆中...";
             }
         }
-        
+
         const delayHours = 1 + Math.random() * 7;
         nextStatusUpdateTime = now + delayHours * 60 * 60 * 1000;
-        
-        localStorage.setItem('currentStatusText', currentStatusText);
-        localStorage.setItem('nextStatusUpdateTime', nextStatusUpdateTime);
+
+        saveToBackend('currentStatusText', currentStatusText);
+        saveToBackend('nextStatusUpdateTime', nextStatusUpdateTime);
     }
 }
 
@@ -249,39 +369,46 @@ const statusTextarea = document.getElementById('status-library');
 
 function renderStatusCategorySelect() {
     statusCatSelect.innerHTML = '';
-    for(let cat in statusLibrary) {
-        let opt = document.createElement('option'); opt.value = cat; opt.innerText = cat; statusCatSelect.appendChild(opt);
+    for (let cat in statusLibrary) {
+        let opt = document.createElement('option');
+        opt.value = cat;
+        opt.innerText = cat;
+        statusCatSelect.appendChild(opt);
     }
     statusCatSelect.value = currentStatusCategory;
     statusTextarea.value = statusLibrary[currentStatusCategory] || "";
 }
-function switchStatusCategory() { 
-    currentStatusCategory = statusCatSelect.value; 
-    statusTextarea.value = statusLibrary[currentStatusCategory] || ""; 
+
+function switchStatusCategory() {
+    currentStatusCategory = statusCatSelect.value;
+    statusTextarea.value = statusLibrary[currentStatusCategory] || "";
 }
+
 function addNewStatusCategory() {
     const newCat = prompt("请输入新状态分类名称：");
-    if(newCat && newCat.trim() !== "") {
-        if(!statusLibrary[newCat.trim()]) { 
-            statusLibrary[newCat.trim()] = ""; 
-            currentStatusCategory = newCat.trim(); 
-            renderStatusCategorySelect(); 
-        } else { 
-            alert("分类已存在啦宝宝！"); 
+    if (newCat && newCat.trim() !== "") {
+        if (!statusLibrary[newCat.trim()]) {
+            statusLibrary[newCat.trim()] = "";
+            currentStatusCategory = newCat.trim();
+            renderStatusCategorySelect();
+        } else {
+            alert("分类已存在啦宝宝！");
         }
     }
 }
+
 function saveStatusCategory() {
     statusLibrary[currentStatusCategory] = statusTextarea.value;
-    localStorage.setItem('statusLibraryDB', JSON.stringify(statusLibrary)); 
+    saveToBackend('statusLibraryDB', statusLibrary);
     alert("状态库保存成功啦！下次刷新就会生效哦~");
 }
+
 function deleteStatusCategory() {
     if (Object.keys(statusLibrary).length <= 1) { alert("请至少保留一个状态分类哦宝宝！"); return; }
     if (confirm(`确定要删除【${currentStatusCategory}】状态分类吗？`)) {
-        delete statusLibrary[currentStatusCategory]; 
-        localStorage.setItem('statusLibraryDB', JSON.stringify(statusLibrary));
-        currentStatusCategory = Object.keys(statusLibrary)[0]; 
+        delete statusLibrary[currentStatusCategory];
+        saveToBackend('statusLibraryDB', statusLibrary);
+        currentStatusCategory = Object.keys(statusLibrary)[0];
         renderStatusCategorySelect();
     }
 }
@@ -289,30 +416,30 @@ function deleteStatusCategory() {
 // ================= 写信功能逻辑 =================
 function sendLetter() {
     const content = document.getElementById('letter-input').value.trim();
-    if(!content) { alert("信件内容不能为空哦宝宝！"); return; }
+    if (!content) { alert("信件内容不能为空哦宝宝！"); return; }
 
     const now = Date.now();
-    const delayHours = 10 + Math.random() * 14; 
+    const delayHours = 10 + Math.random() * 14;
     const targetTime = now + delayHours * 60 * 60 * 1000;
 
     let allPhrases = [];
-    for(let cat in replyLibrary) {
+    for (let cat in replyLibrary) {
         const phrases = replyLibrary[cat].split(/\n/).filter(p => p.trim() !== '');
         allPhrases = allPhrases.concat(phrases);
     }
     if (allPhrases.length === 0) allPhrases = ["收到你的信啦", "好好照顾自己", "一直陪着你"];
 
-    const sentenceCount = Math.floor(Math.random() * 5) + 8; 
+    const sentenceCount = Math.floor(Math.random() * 5) + 8;
     let replyText = "";
-    
+
     for (let i = 0; i < sentenceCount; i++) {
         let phrase = allPhrases[Math.floor(Math.random() * allPhrases.length)].trim();
         let punctRand = Math.random();
         let punctuation = "。";
-        
+
         if (punctRand < 0.2) punctuation = "！";
         else if (punctRand < 0.4) punctuation = "...";
-        
+
         replyText += phrase + punctuation;
     }
 
@@ -325,7 +452,7 @@ function sendLetter() {
     };
 
     letterHistory.unshift(newLetter);
-    localStorage.setItem('letterHistoryDB', JSON.stringify(letterHistory));
+    saveToBackend('letterHistoryDB', letterHistory);
 
     document.getElementById('letter-input').value = "";
 
@@ -400,7 +527,7 @@ function saveTickleSettings() {
         youAction: document.getElementById('tickle-you-action').value.trim(),
         youSuffix: document.getElementById('tickle-you-suffix').value.trim()
     };
-    localStorage.setItem('tickleSettings', JSON.stringify(tickleSettings));
+    saveToBackend('tickleSettings', tickleSettings);
     alert("拍一拍设置保存成功啦宝宝！");
 }
 
@@ -410,7 +537,7 @@ function triggerMyTickle() {
     const suffix = tickleSettings.mySuffix ? ` ${tickleSettings.mySuffix}` : "";
     const text = `你 ${action} ${name}${suffix}`;
     addMessageToChat('system', 'tickle', text);
-    
+
     if (!isBotReplying && !rhythmSettings.randomReadState) {
         setStatusDot('green');
     }
@@ -426,14 +553,17 @@ function changeWallpaper(event) {
         img.onload = () => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            let w = img.width, h = img.height;
-            const max = 1200; 
-            if(w > h && w > max) { h *= max/w; w = max; }
-            else if(h > max) { w *= max/h; h = max; }
-            canvas.width = w; canvas.height = h;
+            let w = img.width,
+                h = img.height;
+            const max = 1200;
+            if (w > h && w > max) { h *= max / w;
+                w = max; } else if (h > max) { w *= max / h;
+                h = max; }
+            canvas.width = w;
+            canvas.height = h;
             ctx.drawImage(img, 0, 0, w, h);
-            const compressedB64 = canvas.toDataURL('image/jpeg', 0.6); 
-            
+            const compressedB64 = canvas.toDataURL('image/jpeg', 0.6);
+
             document.getElementById('app').style.backgroundImage = `url('${compressedB64}')`;
             localStorage.setItem('chatWallpaper', compressedB64);
             alert("壁纸更换成功啦宝宝！");
@@ -442,6 +572,7 @@ function changeWallpaper(event) {
     };
     reader.readAsDataURL(file);
 }
+
 function clearWallpaper() {
     document.getElementById('app').style.backgroundImage = 'none';
     localStorage.removeItem('chatWallpaper');
@@ -455,56 +586,65 @@ function initRhythmUI() {
     document.getElementById('proactive-toggle').checked = rhythmSettings.proactive;
     document.getElementById('proactive-interval').value = rhythmSettings.proactiveInterval;
     document.getElementById('mix-emoji-toggle').checked = rhythmSettings.mixEmoji;
-    document.getElementById('timestamp-toggle').checked = rhythmSettings.showTimestamp || false; 
-    document.getElementById('random-read-toggle').checked = rhythmSettings.randomReadState || false; 
+    document.getElementById('timestamp-toggle').checked = rhythmSettings.showTimestamp || false;
+    document.getElementById('random-read-toggle').checked = rhythmSettings.randomReadState || false;
     updateRhythmDisplays();
     applyRhythmSettings();
 }
+
 function syncSettings() {
     let minW = parseInt(document.getElementById('min-wait').value);
     let maxW = parseInt(document.getElementById('max-wait').value);
-    if(minW > maxW) { maxW = minW; document.getElementById('max-wait').value = maxW; } 
+    if (minW > maxW) { maxW = minW;
+        document.getElementById('max-wait').value = maxW; }
 
     let oldShowTimestamp = rhythmSettings.showTimestamp;
 
     rhythmSettings = {
-        minWait: minW, maxWait: maxW,
+        minWait: minW,
+        maxWait: maxW,
         proactive: document.getElementById('proactive-toggle').checked,
         proactiveInterval: parseInt(document.getElementById('proactive-interval').value),
         mixEmoji: document.getElementById('mix-emoji-toggle').checked,
         showTimestamp: document.getElementById('timestamp-toggle').checked,
-        randomReadState: document.getElementById('random-read-toggle').checked 
+        randomReadState: document.getElementById('random-read-toggle').checked
     };
-    localStorage.setItem('rhythmSettings', JSON.stringify(rhythmSettings));
+    saveToBackend('rhythmSettings', rhythmSettings);
     updateRhythmDisplays();
     applyRhythmSettings();
 
-    if(oldShowTimestamp !== rhythmSettings.showTimestamp) {
+    if (oldShowTimestamp !== rhythmSettings.showTimestamp) {
         renderChatHistory();
     }
 }
+
 function updateRhythmDisplays() {
     document.getElementById('min-val-display').innerText = rhythmSettings.minWait + 's';
     document.getElementById('max-val-display').innerText = rhythmSettings.maxWait + 's';
     document.getElementById('interval-display').innerText = rhythmSettings.proactiveInterval + '分钟';
 }
+
 function applyRhythmSettings() {
-    if(proactiveTimer) clearInterval(proactiveTimer);
-    if(rhythmSettings.proactive) {
+    if (proactiveTimer) clearInterval(proactiveTimer);
+    if (rhythmSettings.proactive) {
         const ms = rhythmSettings.proactiveInterval * 60 * 1000;
-        proactiveTimer = setInterval(() => { 
-            if(!isBotReplying) {
-                setStatusDot('green'); 
-                triggerBotReply(); 
+        proactiveTimer = setInterval(() => {
+            if (!isBotReplying) {
+                setStatusDot('green');
+                triggerBotReply();
             }
         }, ms);
     }
 }
 
 // ================= 基础及界面 =================
-function openPanel(id) { document.getElementById(id).classList.add('active'); if(id === 'sub-storage') checkStorage(); 
-if (id === 'sub-quiz') renderQuizHistory(); 
-if (id === 'sub-quiz-history') renderFullQuizHistory(); }
+function openPanel(id) {
+    document.getElementById(id).classList.add('active');
+    if (id === 'sub-storage') checkStorage();
+    if (id === 'sub-quiz') renderQuizHistory();
+    if (id === 'sub-quiz-history') renderFullQuizHistory();
+}
+
 function closePanel(id) { document.getElementById(id).classList.remove('active'); }
 
 function changeName() {
@@ -521,11 +661,15 @@ function updatePartnerNameDisplay(name) {
     spans.forEach(span => span.innerText = name);
 }
 
-function setTheme(themeName) { 
-    document.documentElement.setAttribute('data-theme', themeName); 
+function setTheme(themeName) {
+    document.documentElement.setAttribute('data-theme', themeName);
     localStorage.setItem('theme', themeName);
 }
-function changeReplyMode() { replyMode = document.getElementById('reply-mode-select').value; localStorage.setItem('replyMode', replyMode); }
+
+function changeReplyMode() {
+    replyMode = document.getElementById('reply-mode-select').value;
+    saveToBackend('replyMode', replyMode);
+}
 
 function setStatusDot(color) {
     statusDot.classList.remove('yellow', 'red');
@@ -536,65 +680,65 @@ function setStatusDot(color) {
 function checkAndTriggerReply() {
     if (rhythmSettings.randomReadState) {
         const rand = Math.random();
-        if (rand < 0.20) { 
-            setStatusDot('yellow'); 
-            return; 
+        if (rand < 0.20) {
+            setStatusDot('yellow');
+            return;
         }
     }
-    setStatusDot('green'); 
+    setStatusDot('green');
     triggerBotReply();
 }
 
-// ================= 聊天及历史记录 (已更新) =================
+// ================= 聊天及历史记录 =================
 function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2); }
 
 function renderChatHistory() {
-chatWindow.innerHTML = ''; 
-let lastDateStr = null;
-chatHistory.forEach((msg) => {
-    const msgDate = new Date(msg.timestampFull || msg.sendTime || Date.now());
-    const todayStr = msgDate.getFullYear() + '年' + (msgDate.getMonth() + 1) + '月' + msgDate.getDate() + '日 星期' + ['日','一','二','三','四','五','六'][msgDate.getDay()];
-    
+    chatWindow.innerHTML = '';
+    let lastDateStr = null;
+    chatHistory.forEach((msg) => {
+        const msgDate = new Date(msg.timestampFull || msg.sendTime || Date.now());
+        const todayStr = msgDate.getFullYear() + '年' + (msgDate.getMonth() + 1) + '月' + msgDate.getDate() + '日 星期' + ['日', '一', '二', '三', '四', '五', '六'][msgDate.getDay()];
+
+        if (!lastDateStr || lastDateStr !== todayStr) {
+            const dateDiv = document.createElement('div');
+            dateDiv.style.cssText = 'text-align: center; font-size: 12px; color: #999; padding: 14px 0 10px 0;';
+            dateDiv.innerText = todayStr;
+            chatWindow.appendChild(dateDiv);
+            lastDateStr = todayStr;
+        }
+        appendDOMOnly(msg.id, msg.sender, msg.type, msg.content, msg.quote, msg.timestamp);
+    });
+}
+
+function addMessageToChat(sender, type, content, quote = null) {
+    const msgId = generateId();
+    const now = new Date();
+    const timestamp = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const todayStr = now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日 星期' + ['日', '一', '二', '三', '四', '五', '六'][now.getDay()];
+
+    let lastDateStr = null;
+    if (chatHistory.length > 0) {
+        const lastMsg = chatHistory[chatHistory.length - 1];
+        const lastDate = new Date(lastMsg.timestampFull || lastMsg.sendTime || Date.now());
+        lastDateStr = lastDate.getFullYear() + '年' + (lastDate.getMonth() + 1) + '月' + lastDate.getDate() + '日 星期' + ['日', '一', '二', '三', '四', '五', '六'][lastDate.getDay()];
+    }
+
     if (!lastDateStr || lastDateStr !== todayStr) {
         const dateDiv = document.createElement('div');
         dateDiv.style.cssText = 'text-align: center; font-size: 12px; color: #999; padding: 14px 0 10px 0;';
         dateDiv.innerText = todayStr;
         chatWindow.appendChild(dateDiv);
-        lastDateStr = todayStr;
     }
-    appendDOMOnly(msg.id, msg.sender, msg.type, msg.content, msg.quote, msg.timestamp);
-});
-}
 
-function addMessageToChat(sender, type, content, quote = null) {
-const msgId = generateId();
-const now = new Date();
-const timestamp = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-
-const todayStr = now.getFullYear() + '年' + (now.getMonth() + 1) + '月' + now.getDate() + '日 星期' + ['日','一','二','三','四','五','六'][now.getDay()];
-
-let lastDateStr = null;
-if (chatHistory.length > 0) {
-    const lastMsg = chatHistory[chatHistory.length - 1];
-    const lastDate = new Date(lastMsg.timestampFull || lastMsg.sendTime || Date.now());
-    lastDateStr = lastDate.getFullYear() + '年' + (lastDate.getMonth() + 1) + '月' + lastDate.getDate() + '日 星期' + ['日','一','二','三','四','五','六'][lastDate.getDay()];
-}
-
-if (!lastDateStr || lastDateStr !== todayStr) {
-    const dateDiv = document.createElement('div');
-    dateDiv.style.cssText = 'text-align: center; font-size: 12px; color: #999; padding: 14px 0 10px 0;';
-    dateDiv.innerText = todayStr;
-    chatWindow.appendChild(dateDiv);
-}
-
-appendDOMOnly(msgId, sender, type, content, quote, timestamp);
-chatHistory.push({ id: msgId, sender, type, content, quote, timestamp, timestampFull: now.toISOString() });
-if (chatHistory.length > 300) chatHistory.shift();
-localStorage.setItem('chatHistoryDB', JSON.stringify(chatHistory));
+    appendDOMOnly(msgId, sender, type, content, quote, timestamp);
+    chatHistory.push({ id: msgId, sender, type, content, quote, timestamp, timestampFull: now.toISOString() });
+    if (chatHistory.length > 300) chatHistory.shift();
+    saveToBackend('chatHistoryDB', chatHistory);
 }
 
 function appendDOMOnly(id, sender, type, content, quote = null, timestamp = null) {
-    const row = document.createElement('div'); 
+    const row = document.createElement('div');
     row.className = `msg-row ${sender}`;
     row.dataset.id = id;
 
@@ -608,10 +752,11 @@ function appendDOMOnly(id, sender, type, content, quote = null, timestamp = null
         return;
     }
 
-    const avatar = document.createElement('div'); avatar.className = 'chat-avatar';
-    const bubble = document.createElement('div'); bubble.className = 'bubble';
-    
-    // 所有气泡都可以长按了
+    const avatar = document.createElement('div');
+    avatar.className = 'chat-avatar';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+
     bindLongPress(bubble, id, sender, type, content);
 
     if (sender === 'you') {
@@ -631,7 +776,7 @@ function appendDOMOnly(id, sender, type, content, quote = null, timestamp = null
     if (quote) innerHTML += `<div class="quote-block">${quote}</div>`;
 
     if (type === 'img') {
-        bubble.style.padding = '5px'; 
+        bubble.style.padding = '5px';
         innerHTML += `<img src="${content}" class="bubble-img">`;
     } else if (type === 'mixed') {
         bubble.className = 'bubble bubble-mixed';
@@ -641,9 +786,9 @@ function appendDOMOnly(id, sender, type, content, quote = null, timestamp = null
         innerHTML += `
             <span>${content.text}</span>
             <div class="voice-player" onclick="togglePlayAudio(event, '${id}')">
-                <span class="voice-icon"></span>
+                <span class="voice-icon">►</span>
                 <div class="voice-waveform">
-                    ${Array(24).fill('<div class="wave"></div>').join('')}
+                    ${Array(6).fill('<div class="wave"></div>').join('')}
                 </div>
                 <span class="voice-duration">${content.duration}</span>
             </div>
@@ -659,38 +804,40 @@ function appendDOMOnly(id, sender, type, content, quote = null, timestamp = null
         timeDiv.innerText = timestamp;
     }
 
-    if (sender === 'me') { 
+    if (sender === 'me') {
         if (rhythmSettings.showTimestamp && timestamp) row.appendChild(timeDiv);
-        row.appendChild(bubble); 
-        row.appendChild(avatar); 
-    } else { 
-        row.appendChild(avatar); 
-        row.appendChild(bubble); 
+        row.appendChild(bubble);
+        row.appendChild(avatar);
+    } else {
+        row.appendChild(avatar);
+        row.appendChild(bubble);
         if (rhythmSettings.showTimestamp && timestamp) row.appendChild(timeDiv);
     }
-    
+
     chatWindow.appendChild(row);
     chatWindow.scrollTop = chatWindow.scrollHeight;
 }
 
 
 function clearHistory() {
-    if(confirm("确定要清空所有聊天记录吗宝宝？")) {
-        chatHistory = []; localStorage.removeItem('chatHistoryDB');
-        renderChatHistory(); closePanel('settings-menu');
+    if (confirm("确定要清空所有聊天记录吗宝宝？")) {
+        chatHistory = [];
+        saveToBackend('chatHistoryDB', chatHistory);
+        renderChatHistory();
+        closePanel('settings-menu');
     }
 }
 
-// ================= 导出/导入数据逻辑 (现代化分离架构版) =================
+// ================= 导出/导入数据逻辑 =================
 const yieldThread = () => new Promise(resolve => setTimeout(resolve, 10));
 
 const BackupUtils = {
     isMedia: (s) => typeof s === 'string' && s.length > 500 && /^data:(image|video|audio)\//i.test(s),
-    
+
     extractMedia: (node, state) => {
         if (!state) state = { store: {}, map: new Map(), n: 0 };
         if (node === null || node === undefined) return node;
-        
+
         if (typeof node === 'object' && node.data && BackupUtils.isMedia(node.data)) {
             let id = state.map.get(node.data);
             if (!id) {
@@ -722,7 +869,7 @@ const BackupUtils = {
         }
         return node;
     },
-    
+
     inlineMedia: (node, store) => {
         if (!store) store = {};
         if (node === null || node === undefined) return node;
@@ -735,7 +882,7 @@ const BackupUtils = {
         if (typeof node === 'object' && !Array.isArray(node) && node.__mRef) {
             return store[node.__mRef] !== undefined ? store[node.__mRef] : node;
         }
-        
+
         if (Array.isArray(node)) return node.map(x => BackupUtils.inlineMedia(x, store));
         if (typeof node === 'object') {
             let o = {};
@@ -747,45 +894,44 @@ const BackupUtils = {
 
     dataUrlToBinary: (dataUrl) => {
         const m = /^data:([^,]+),([\s\S]*)$/.exec(dataUrl);
-        if(!m) return null;
+        if (!m) return null;
         try {
             const binary = atob(m[2].replace(/\s/g, ''));
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
             return { mime: m[1].split(';')[0].trim(), bytes };
-        } catch(e) { return null; }
+        } catch (e) { return null; }
     }
 };
 
 async function exportData() {
-    const backupBtn = document.getElementById('export-btn'); 
-    
+    const backupBtn = document.getElementById('export-btn');
+
     try {
         if (backupBtn) backupBtn.innerText = "准备环境...";
-        await yieldThread(); 
+        await yieldThread();
 
         let lsData = {};
         const keys = Object.keys(localStorage);
         const totalKeys = keys.length;
-        
+
         for (let j = 0; j < totalKeys; j++) {
             let key = keys[j];
             let val = localStorage.getItem(key);
-            try { lsData[key] = JSON.parse(val); } 
-            catch(e) { lsData[key] = val; }
-            
+            try { lsData[key] = JSON.parse(val); } catch (e) { lsData[key] = val; }
+
             if (j % 5 === 0) {
                 if (backupBtn) backupBtn.innerText = `读取数据... ${Math.round((j / totalKeys) * 100)}%`;
-                await yieldThread(); 
+                await yieldThread();
             }
         }
 
         if (backupBtn) backupBtn.innerText = "压缩媒体文件中...";
         await yieldThread();
-        
+
         let state = { store: {}, map: new Map(), n: 0 };
         let processedLs = BackupUtils.extractMedia(lsData, state);
-        
+
         let payload = {
             type: 'chatapp-backup-v4',
             timestamp: new Date().toISOString(),
@@ -794,12 +940,12 @@ async function exportData() {
         };
 
         const dateStr = new Date().toLocaleDateString().replace(/\//g, '-');
-        
+
         if (typeof JSZip !== 'undefined') {
             const zip = new JSZip();
             let mediaIndex = {};
             let mediaIds = Object.keys(payload.mediaStore);
-            
+
             for (let i = 0; i < mediaIds.length; i++) {
                 let id = mediaIds[i];
                 let bin = BackupUtils.dataUrlToBinary(payload.mediaStore[id]);
@@ -809,33 +955,33 @@ async function exportData() {
                 }
                 if (i % 10 === 0) {
                     if (backupBtn) backupBtn.innerText = `打包媒体... ${Math.round((i / mediaIds.length) * 100)}%`;
-                    await yieldThread(); 
+                    await yieldThread();
                 }
             }
-            
-            delete payload.mediaStore; 
+
+            delete payload.mediaStore;
             payload.mediaIndex = mediaIndex;
             zip.file('backup.json', JSON.stringify(payload));
-            
+
             if (backupBtn) backupBtn.innerText = "生成压缩包...";
             await yieldThread();
 
-            const blob = await zip.generateAsync({ 
-                type: 'blob', 
+            const blob = await zip.generateAsync({
+                type: 'blob',
                 compression: 'DEFLATE',
-                }, function updateCallback(metadata) {
-                    if (backupBtn) backupBtn.innerText = `压缩中: ${metadata.percent.toFixed(0)}%`;
+            }, function updateCallback(metadata) {
+                if (backupBtn) backupBtn.innerText = `压缩中: ${metadata.percent.toFixed(0)}%`;
             });
-            
+
             downloadFile(blob, `摇光_${dateStr}.zip`);
         } else {
             if (backupBtn) backupBtn.innerText = "生成 JSON 文件...";
             await yieldThread();
             const str = JSON.stringify(payload);
-            const blob = new Blob([str], {type: "application/json;charset=utf-8"});
+            const blob = new Blob([str], { type: "application/json;charset=utf-8" });
             downloadFile(blob, `摇光_${dateStr}.json`);
         }
-        
+
         alert("宝宝，数据导出成功啦！妥妥的保存好哦~");
     } catch (err) {
         console.error("导出异常：", err);
@@ -859,30 +1005,31 @@ async function importData(event) {
     if (!file) return;
 
     if (!confirm("导入数据将覆盖当前的所有聊天记录、设置和表情包哦！确定要继续吗宝宝？")) {
-        event.target.value = ''; return;
+        event.target.value = '';
+        return;
     }
 
     try {
         let finalData = {};
-        
+
         if (file.name.endsWith('.zip')) {
             if (typeof JSZip === 'undefined') throw new Error("缺少 ZIP 解析库");
             const zip = await JSZip.loadAsync(file);
             let jsonRaw = await zip.file('backup.json').async('string');
             let parsed = JSON.parse(jsonRaw);
-            
+
             if (parsed.mediaIndex) {
-               parsed.mediaStore = {};
-               const mediaIds = Object.keys(parsed.mediaIndex);
-               for (let i=0; i < mediaIds.length; i++) {
-                   let id = mediaIds[i];
-                   const zf = zip.file(`media/${id}`);
-                   if(zf) {
-                       const ab = await zf.async('arraybuffer');
-                       parsed.mediaStore[id] = 'data:' + parsed.mediaIndex[id].mime + ';base64,' + 
-                           btoa(String.fromCharCode(...new Uint8Array(ab)));
-                   }
-               }
+                parsed.mediaStore = {};
+                const mediaIds = Object.keys(parsed.mediaIndex);
+                for (let i = 0; i < mediaIds.length; i++) {
+                    let id = mediaIds[i];
+                    const zf = zip.file(`media/${id}`);
+                    if (zf) {
+                        const ab = await zf.async('arraybuffer');
+                        parsed.mediaStore[id] = 'data:' + parsed.mediaIndex[id].mime + ';base64,' +
+                            btoa(String.fromCharCode(...new Uint8Array(ab)));
+                    }
+                }
             }
             finalData = parsed;
         } else {
@@ -891,7 +1038,7 @@ async function importData(event) {
         }
 
         localStorage.clear();
-        
+
         if (finalData.type && finalData.type.startsWith('chatapp-backup')) {
             let restoredLs = BackupUtils.inlineMedia(finalData.localStorage, finalData.mediaStore);
             for (let key in restoredLs) {
@@ -903,27 +1050,29 @@ async function importData(event) {
                 localStorage.setItem(key, finalData[key]);
             }
         }
-        
-        alert("导入成功啦！页面即将刷新以加载那些美好的新数据~");
+
+        // 导入后重新加载到内存
+        await loadAllData();
         location.reload();
-    } catch(err) {
+
+        alert("导入成功啦！页面即将刷新以加载那些美好的新数据~");
+    } catch (err) {
         console.error(err);
         alert("导入失败了呜呜，可能是文件损坏或者不支持该格式哦。");
     } finally {
-        event.target.value = ''; 
+        event.target.value = '';
     }
 }
 
-// ================= 长按与上下文菜单 (已更新) =================
+// ================= 长按与上下文菜单 =================
 function bindLongPress(element, id, sender, type, content) {
     let isPressing = false;
-    
+
     const start = (e) => {
-        // 阻止在播放器上触发长按
         if (e.target.closest('.voice-player')) return;
         isPressing = true;
         pressTimer = setTimeout(() => {
-            if(isPressing) showContextMenu(e, id, sender, type, content);
+            if (isPressing) showContextMenu(e, id, sender, type, content);
         }, 500);
     };
     const cancel = () => {
@@ -931,7 +1080,7 @@ function bindLongPress(element, id, sender, type, content) {
         clearTimeout(pressTimer);
     };
 
-    element.addEventListener('touchstart', start, {passive: true});
+    element.addEventListener('touchstart', start, { passive: true });
     element.addEventListener('touchend', cancel);
     element.addEventListener('touchmove', cancel);
     element.addEventListener('mousedown', start);
@@ -946,23 +1095,23 @@ function bindLongPress(element, id, sender, type, content) {
 
 function showContextMenu(e, id, sender, type, content) {
     e.preventDefault();
-    e.stopPropagation(); 
+    e.stopPropagation();
     selectedMsgIdForContext = id;
-    
+
     let qText = (sender === 'me' ? "你" : document.getElementById('display-name').innerText) + ": ";
-    if(type === 'img') qText += "[图片]";
-    else if(type === 'mixed') qText += content.text + " [图片]";
-    else if(type === 'voice') qText += `[语音] ${content.text}`;
+    if (type === 'img') qText += "[图片]";
+    else if (type === 'mixed') qText += content.text + " [图片]";
+    else if (type === 'voice') qText += `[语音] ${content.text}`;
     else qText += content;
-    
+
     selectedMsgIdForContext = { id, text: qText };
 
     const menu = document.getElementById('context-menu');
     menu.style.display = 'flex';
-    
+
     let clientX = e.clientX || (e.touches && e.touches[0].clientX);
     let clientY = e.clientY || (e.touches && e.touches[0].clientY);
-    
+
     menu.style.left = Math.min(clientX, window.innerWidth - 120) + 'px';
     menu.style.top = Math.min(clientY, window.innerHeight - 100) + 'px';
 }
@@ -971,44 +1120,46 @@ function hideContextMenu() { document.getElementById('context-menu').style.displ
 
 function triggerQuote() {
     hideContextMenu();
-    if(!selectedMsgIdForContext) return;
+    if (!selectedMsgIdForContext) return;
     currentQuoteText = selectedMsgIdForContext.text;
     document.getElementById('reply-preview-text').innerText = "回复：" + currentQuoteText;
     document.getElementById('reply-preview-bar').style.display = 'flex';
     msgInput.focus();
 }
-function cancelQuote() { currentQuoteText = null; document.getElementById('reply-preview-bar').style.display = 'none'; }
+
+function cancelQuote() { currentQuoteText = null;
+    document.getElementById('reply-preview-bar').style.display = 'none'; }
 
 function triggerDelete() {
     hideContextMenu();
-    if(!selectedMsgIdForContext) return;
+    if (!selectedMsgIdForContext) return;
     const idToDelete = selectedMsgIdForContext.id;
-    
+
     chatHistory = chatHistory.filter(msg => msg.id !== idToDelete);
-    localStorage.setItem('chatHistoryDB', JSON.stringify(chatHistory));
-    
+    saveToBackend('chatHistoryDB', chatHistory);
+
     const row = document.querySelector(`.msg-row[data-id="${idToDelete}"]`);
-    if(row) {
+    if (row) {
         row.style.opacity = '0';
         setTimeout(() => row.remove(), 200);
     }
 }
 
-// ================= 发送与回复逻辑 (已更新) =================
+// ================= 发送与回复逻辑 =================
 function handleEnter(e) { if (e.key === 'Enter') handleSendButton(); }
 
 function handleSendButton() {
     const text = msgInput.value.trim();
     document.getElementById('sticker-drawer').classList.remove('active');
-    
-    if (!text) { 
-        if(!isBotReplying) checkAndTriggerReply(); 
-        return; 
+
+    if (!text) {
+        if (!isBotReplying) checkAndTriggerReply();
+        return;
     }
-    
+
     addMessageToChat('me', 'text', text, currentQuoteText);
     msgInput.value = '';
-    cancelQuote(); 
+    cancelQuote();
 
     if (rhythmSettings.randomReadState && !isBotReplying) {
         const rand = Math.random();
@@ -1021,21 +1172,26 @@ function handleSendButton() {
 
 function showTypingIndicator() {
     if (document.getElementById('typing-indicator-row')) return;
-    const row = document.createElement('div'); row.className = 'msg-row you'; row.id = 'typing-indicator-row';
-    row.innerHTML = `<div class="chat-avatar" style="background-image: var(--you-avatar)"></div><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`;
-    chatWindow.appendChild(row); chatWindow.scrollTop = chatWindow.scrollHeight;
+    const row = document.createElement('div');
+    row.className = 'msg-row you';
+    row.id = 'typing-indicator-row';
+    row.innerHTML =
+    `<div class="chat-avatar" style="background-image: var(--you-avatar)"></div><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>`;
+    chatWindow.appendChild(row);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
 }
+
 function hideTypingIndicator() { const el = document.getElementById('typing-indicator-row'); if (el) el.remove(); }
 
 async function triggerBotReply() {
     isBotReplying = true;
-    
+
     let allPhrases = [];
-    for(let cat in replyLibrary) {
+    for (let cat in replyLibrary) {
         allPhrases = allPhrases.concat(replyLibrary[cat].split(/\n/).filter(p => p.trim() !== ''));
     }
     let allVoices = [];
-    for(let cat in voiceLibrary) {
+    for (let cat in voiceLibrary) {
         allVoices = allVoices.concat(voiceLibrary[cat] || []);
     }
     const allStickers = youStickers;
@@ -1053,7 +1209,7 @@ async function triggerBotReply() {
 
     let currentMode = replyMode;
     if (currentMode === 'mixed') currentMode = Math.random() > 0.5 ? 'split' : 'combined';
-    
+
     let messageQueue = [];
 
     if (Math.random() < 0.03) {
@@ -1062,7 +1218,7 @@ async function triggerBotReply() {
         const suffix = tickleSettings.youSuffix ? ` ${tickleSettings.youSuffix}` : "";
         messageQueue.push({ type: 'tickle', content: `${name} ${action} 你${suffix}` });
     }
-    
+
     const totalItems = allPhrases.length + allVoices.length + allStickers.length;
     let combinedText = [];
     let combinedSticker = null;
@@ -1093,7 +1249,8 @@ async function triggerBotReply() {
                 if (!combinedSticker) combinedSticker = sticker;
             } else {
                 if (rhythmSettings.mixEmoji) {
-                    const phrase = allPhrases.length > 0 ? allPhrases[Math.floor(Math.random() * allPhrases.length)].trim() : '...';
+                    const phrase = allPhrases.length > 0 ? allPhrases[Math.floor(Math.random() * allPhrases.length)].trim() :
+                        '...';
                     messageQueue.push({ type: 'mixed', content: { text: phrase, img: sticker } });
                 } else {
                     messageQueue.push({ type: 'img', content: sticker });
@@ -1142,34 +1299,34 @@ function getAudioDuration(data) {
             resolve(durationStr);
         };
         audio.onerror = () => resolve('???"');
-        setTimeout(() => { if(audio.readyState === 0) resolve('???"'); }, 2000);
+        setTimeout(() => { if (audio.readyState === 0) resolve('???"'); }, 2000);
     });
 }
 
 
 function processMessageQueue(queue) {
-    if(queue.length === 0) { isBotReplying = false; return; }
-    
+    if (queue.length === 0) { isBotReplying = false; return; }
+
     let minDelay = rhythmSettings.minWait * 1000;
     let maxDelay = rhythmSettings.maxWait * 1000;
     let delay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
-    
+
     const nextMsg = queue[0];
-    
+
     if (nextMsg.type === 'tickle') {
         queue.shift();
         addMessageToChat('system', 'tickle', nextMsg.content);
         setTimeout(() => processMessageQueue(queue), 300);
         return;
     }
-    
+
     showTypingIndicator();
 
     setTimeout(() => {
         hideTypingIndicator();
         const msg = queue.shift();
         addMessageToChat('you', msg.type, msg.content, msg.quote);
-        if(queue.length > 0) setTimeout(() => processMessageQueue(queue), 400 + Math.random() * 500);
+        if (queue.length > 0) setTimeout(() => processMessageQueue(queue), 400 + Math.random() * 500);
         else isBotReplying = false;
     }, delay);
 }
@@ -1179,187 +1336,213 @@ function processMessageQueue(queue) {
 let quizHistory = JSON.parse(localStorage.getItem('quizHistoryDB')) || [];
 
 function sendQuiz() {
-const qs = [];
-for (let i = 1; i <= 5; i++) {
-    const val = document.getElementById(`quiz-q${i}`).value.trim();
-    if (!val) { alert(`第 ${i} 个问题不能空哦宝宝！`); return; }
-    qs.push(val);
-}
+    const qs = [];
+    for (let i = 1; i <= 5; i++) {
+        const val = document.getElementById(`quiz-q${i}`).value.trim();
+        if (!val) { alert(`第 ${i} 个问题不能空哦宝宝！`); return; }
+        qs.push(val);
+    }
 
-let allPhrases = [];
-for (let cat in replyLibrary) {
-    const phrases = replyLibrary[cat].split(/\n/).filter(p => p.trim() !== '');
-    allPhrases = allPhrases.concat(phrases);
-}
-if (allPhrases.length === 0) allPhrases = ["嗯嗯，你说得对", "好哦", "我懂你", "抱抱", "一直陪着你"];
+    let allPhrases = [];
+    for (let cat in replyLibrary) {
+        const phrases = replyLibrary[cat].split(/\n/).filter(p => p.trim() !== '');
+        allPhrases = allPhrases.concat(phrases);
+    }
+    if (allPhrases.length === 0) allPhrases = ["嗯嗯，你说得对", "好哦", "我懂你", "抱抱", "一直陪着你"];
 
-const answers = qs.map(() => {
-    return allPhrases[Math.floor(Math.random() * allPhrases.length)].trim();
-});
+    const answers = qs.map(() => {
+        return allPhrases[Math.floor(Math.random() * allPhrases.length)].trim();
+    });
 
-const now = Date.now();
-const delayMinutes = 20 + Math.floor(Math.random() * 11); 
-const targetTime = now + delayMinutes * 60 * 1000;
+    const now = Date.now();
+    const delayMinutes = 20 + Math.floor(Math.random() * 11);
+    const targetTime = now + delayMinutes * 60 * 1000;
 
-const quizRecord = {
-    id: generateId(),
-    questions: qs,
-    answers: answers,
-    sendTime: now,
-    targetTime: targetTime,
-    isReplied: false
-};
+    const quizRecord = {
+        id: generateId(),
+        questions: qs,
+        answers: answers,
+        sendTime: now,
+        targetTime: targetTime,
+        isReplied: false
+    };
 
-quizHistory.unshift(quizRecord);
-localStorage.setItem('quizHistoryDB', JSON.stringify(quizHistory));
+    quizHistory.unshift(quizRecord);
+    saveToBackend('quizHistoryDB', quizHistory);
 
-for (let i = 1; i <= 5; i++) {
-    document.getElementById(`quiz-q${i}`).value = '';
-}
+    for (let i = 1; i <= 5; i++) {
+        document.getElementById(`quiz-q${i}`).value = '';
+    }
 
-renderQuizHistory();
+    renderQuizHistory();
 
-const arriveTime = new Date(targetTime);
-const timeStr = `${arriveTime.getHours().toString().padStart(2,'0')}:${arriveTime.getMinutes().toString().padStart(2,'0')}`;
-alert(`问卷寄出啦！预计 ${timeStr} 左右会收到回复哦~`);
+    const arriveTime = new Date(targetTime);
+    const timeStr =
+        `${arriveTime.getHours().toString().padStart(2,'0')}:${arriveTime.getMinutes().toString().padStart(2,'0')}`;
+    alert(`问卷寄出啦！预计 ${timeStr} 左右会收到回复哦~`);
 }
 
 function renderQuizHistory() {
-const container = document.getElementById('quiz-history-list');
-if (!container) return;
-container.innerHTML = '';
+    const container = document.getElementById('quiz-history-list');
+    if (!container) return;
+    container.innerHTML = '';
 
-if (quizHistory.length === 0) {
-    container.innerHTML = '<div style="color:#888; font-size:13px;">还没有问卷记录呢，寄出第一份吧~</div>';
-    return;
-}
+    if (quizHistory.length === 0) {
+        container.innerHTML = '<div style="color:#888; font-size:13px;">还没有问卷记录呢，寄出第一份吧~</div>';
+        return;
+    }
 
-const now = Date.now();
-const pendingQuizzes = quizHistory.filter(record => now < record.targetTime);
+    const now = Date.now();
+    const pendingQuizzes = quizHistory.filter(record => now < record.targetTime);
 
-if (pendingQuizzes.length === 0) {
-    container.innerHTML = '<div style="color:#888; font-size:13px; text-align:center; padding:10px 0;">没有待回复的问卷，寄出新问题吧</div>';
-    return;
-}
+    if (pendingQuizzes.length === 0) {
+        container.innerHTML =
+            '<div style="color:#888; font-size:13px; text-align:center; padding:10px 0;">没有待回复的问卷，寄出新问题吧</div>';
+        return;
+    }
 
-pendingQuizzes.forEach((record, idx) => {
-    const sendDate = new Date(record.sendTime);
-    const sendStr = `${sendDate.getHours().toString().padStart(2,'0')}:${sendDate.getMinutes().toString().padStart(2,'0')}`;
+    pendingQuizzes.forEach((record, idx) => {
+        const sendDate = new Date(record.sendTime);
+        const sendStr =
+            `${sendDate.getHours().toString().padStart(2,'0')}:${sendDate.getMinutes().toString().padStart(2,'0')}`;
 
-    let html = `<div style="border-bottom:1px solid var(--border-color); padding:12px 0;">`;
-    html += `<div style="font-weight:600; font-size:13px; color:var(--accent-color);">问卷 <span style="font-weight:400; color:#888; font-size:12px;">${sendStr}</span></div>`;
+        let html = `<div style="border-bottom:1px solid var(--border-color); padding:12px 0;">`;
+        html +=
+            `<div style="font-weight:600; font-size:13px; color:var(--accent-color);">问卷 <span style="font-weight:400; color:#888; font-size:12px;">${sendStr}</span></div>`;
 
-    record.questions.forEach((q, i) => {
-        html += `<div style="font-size:13px; margin-top:6px; color:var(--text-color);">${i+1}. ${q}</div>`;
-        const remain = Math.max(0, Math.ceil((record.targetTime - now) / 60000));
-        html += `<div style="font-size:12px; color:#888; padding-left:18px; font-style:italic;">预计 ${remain} 分钟后回复</div>`;
+        record.questions.forEach((q, i) => {
+            html += `<div style="font-size:13px; margin-top:6px; color:var(--text-color);">${i+1}. ${q}</div>`;
+            const remain = Math.max(0, Math.ceil((record.targetTime - now) / 60000));
+            html +=
+                `<div style="font-size:12px; color:#888; padding-left:18px; font-style:italic;">预计 ${remain} 分钟后回复</div>`;
+        });
+
+        html += `</div>`;
+        container.innerHTML += html;
     });
-
-    html += `</div>`;
-    container.innerHTML += html;
-});
 }
 
 setInterval(() => {
-if (document.getElementById('sub-quiz') && document.getElementById('sub-quiz').classList.contains('active')) {
-    renderQuizHistory();
-}
-if (document.getElementById('sub-quiz-history') && document.getElementById('sub-quiz-history').classList.contains('active')) {
-    renderFullQuizHistory();  
-}
+    if (document.getElementById('sub-quiz') && document.getElementById('sub-quiz').classList.contains('active')) {
+        renderQuizHistory();
+    }
+    if (document.getElementById('sub-quiz-history') && document.getElementById('sub-quiz-history').classList.contains(
+            'active')) {
+        renderFullQuizHistory();
+    }
 }, 30000);
 
 // ================= 问卷历史 =================
 function openQuizHistory() {
-renderFullQuizHistory();
-openPanel('sub-quiz-history');
+    renderFullQuizHistory();
+    openPanel('sub-quiz-history');
 }
 
 function renderFullQuizHistory() {
-const container = document.getElementById('quiz-history-list-full');
-if (!container) return;
-container.innerHTML = '';
+    const container = document.getElementById('quiz-history-list-full');
+    if (!container) return;
+    container.innerHTML = '';
 
-if (quizHistory.length === 0) {
-    container.innerHTML = '<div style="text-align:center; color:#888; font-size:14px; margin-top:30px;">还没有问卷记录哦，寄出第一份吧~</div>';
-    return;
-}
-
-const now = Date.now();
-
-quizHistory.forEach((record, idx) => {
-    const sendDate = new Date(record.sendTime);
-    const sendStr = `${sendDate.getMonth()+1}-${sendDate.getDate()} ${sendDate.getHours().toString().padStart(2,'0')}:${sendDate.getMinutes().toString().padStart(2,'0')}`;
-
-    let html = `
-        <div class="letter-card" style="margin-bottom:15px;">
-            <div class="sender">问卷 #${quizHistory.length - idx} <span class="time">${sendStr}</span></div>
-    `;
-
-    record.questions.forEach((q, i) => {
-        html += `<div style="font-size:14px; margin-top:6px; color:var(--text-color);">${i+1}. ${q}</div>`;
-        if (now >= record.targetTime) {
-            html += `<div style="font-size:14px; color:var(--accent-color); padding-left:18px; margin-bottom:6px;">↳ ${record.answers[i] || "…"}</div>`;
-        } else {
-            const remain = Math.max(0, Math.ceil((record.targetTime - now) / 60000));
-            html += `<div style="font-size:13px; color:#888; padding-left:18px; font-style:italic;">预计 ${remain} 分钟后回复</div>`;
-        }
-    });
-
-    if (now >= record.targetTime) {
-        html += `<div style="font-size:12px; color:#888; margin-top:8px;">已全部回复</div>`;
-    } else {
-        html += `<div style="font-size:12px; color:#888; margin-top:8px;">等待回复中...</div>`;
+    if (quizHistory.length === 0) {
+        container.innerHTML =
+            '<div style="text-align:center; color:#888; font-size:14px; margin-top:30px;">还没有问卷记录哦，寄出第一份吧~</div>';
+        return;
     }
 
-    html += `</div>`;
-    container.innerHTML += html;
-});
+    const now = Date.now();
+
+    quizHistory.forEach((record, idx) => {
+        const sendDate = new Date(record.sendTime);
+        const sendStr =
+            `${sendDate.getMonth()+1}-${sendDate.getDate()} ${sendDate.getHours().toString().padStart(2,'0')}:${sendDate.getMinutes().toString().padStart(2,'0')}`;
+
+        let html = `
+            <div class="letter-card" style="margin-bottom:15px;">
+                <div class="sender">问卷 #${quizHistory.length - idx} <span class="time">${sendStr}</span></div>
+        `;
+
+        record.questions.forEach((q, i) => {
+            html += `<div style="font-size:14px; margin-top:6px; color:var(--text-color);">${i+1}. ${q}</div>`;
+            if (now >= record.targetTime) {
+                html +=
+                    `<div style="font-size:14px; color:var(--accent-color); padding-left:18px; margin-bottom:6px;">↳ ${record.answers[i] || "…"}</div>`;
+            } else {
+                const remain = Math.max(0, Math.ceil((record.targetTime - now) / 60000));
+                html +=
+                    `<div style="font-size:13px; color:#888; padding-left:18px; font-style:italic;">预计 ${remain} 分钟后回复</div>`;
+            }
+        });
+
+        if (now >= record.targetTime) {
+            html += `<div style="font-size:12px; color:#888; margin-top:8px;">已全部回复</div>`;
+        } else {
+            html += `<div style="font-size:12px; color:#888; margin-top:8px;">等待回复中...</div>`;
+        }
+
+        html += `</div>`;
+        container.innerHTML += html;
+    });
 }
 
 // ================= 分类及表情包管理 =================
 function renderCategorySelect() {
     catSelect.innerHTML = '';
-    for(let cat in replyLibrary) {
-        let opt = document.createElement('option'); opt.value = cat; opt.innerText = cat; catSelect.appendChild(opt);
+    for (let cat in replyLibrary) {
+        let opt = document.createElement('option');
+        opt.value = cat;
+        opt.innerText = cat;
+        catSelect.appendChild(opt);
     }
     catSelect.value = currentCategory;
     replyTextarea.value = replyLibrary[currentCategory] || "";
 }
-function switchCategory() { currentCategory = catSelect.value; replyTextarea.value = replyLibrary[currentCategory] || ""; }
+
+function switchCategory() { currentCategory = catSelect.value;
+    replyTextarea.value = replyLibrary[currentCategory] || ""; }
+
 function addNewCategory() {
     const newCat = prompt("请输入新分类名称：");
-    if(newCat && newCat.trim() !== "") {
-        if(!replyLibrary[newCat.trim()]) { replyLibrary[newCat.trim()] = ""; currentCategory = newCat.trim(); renderCategorySelect(); } 
-        else { alert("分类已存在"); }
+    if (newCat && newCat.trim() !== "") {
+        if (!replyLibrary[newCat.trim()]) { replyLibrary[newCat.trim()] = "";
+            currentCategory = newCat.trim();
+            renderCategorySelect(); } else { alert("分类已存在"); }
     }
 }
+
 function saveCategory() {
     replyLibrary[currentCategory] = replyTextarea.value;
-    localStorage.setItem('replyLibraryDB', JSON.stringify(replyLibrary)); alert("已保存");
+    saveToBackend('replyLibraryDB', replyLibrary);
+    alert("已保存");
 }
+
 function deleteCategory() {
     if (Object.keys(replyLibrary).length <= 1) { alert("请至少保留一个分类哦！"); return; }
     if (confirm(`确定要删除【${currentCategory}】分类吗？`)) {
-        delete replyLibrary[currentCategory]; localStorage.setItem('replyLibraryDB', JSON.stringify(replyLibrary));
-        currentCategory = Object.keys(replyLibrary)[0]; renderCategorySelect();
+        delete replyLibrary[currentCategory];
+        saveToBackend('replyLibraryDB', replyLibrary);
+        currentCategory = Object.keys(replyLibrary)[0];
+        renderCategorySelect();
     }
 }
 
 function renderStickers() {
-    const myGrid = document.getElementById('my-stickers-grid'); const youGrid = document.getElementById('you-stickers-grid'); const drawer = document.getElementById('sticker-drawer');
-    myGrid.innerHTML = ''; youGrid.innerHTML = ''; drawer.innerHTML = '';
-    
+    const myGrid = document.getElementById('my-stickers-grid');
+    const youGrid = document.getElementById('you-stickers-grid');
+    const drawer = document.getElementById('sticker-drawer');
+    myGrid.innerHTML = '';
+    youGrid.innerHTML = '';
+    drawer.innerHTML = '';
+
     const createStickerWrapper = (b64, type, index) => {
         let wrapper = document.createElement('div');
         wrapper.style.position = 'relative';
         wrapper.style.display = 'inline-block';
-        
-        let img = document.createElement('img'); 
-        img.src = b64; 
-        img.className = 'sticker-item'; 
+
+        let img = document.createElement('img');
+        img.src = b64;
+        img.className = 'sticker-item';
         wrapper.appendChild(img);
-        
+
         let delBtn = document.createElement('div');
         delBtn.innerHTML = '×';
         delBtn.style.position = 'absolute';
@@ -1375,15 +1558,15 @@ function renderStickers() {
         delBtn.style.fontSize = '12px';
         delBtn.style.cursor = 'pointer';
         delBtn.title = '双击删除';
-        
+
         delBtn.ondblclick = () => {
-            if(confirm("确定要删除这个表情包吗宝宝？")) {
+            if (confirm("确定要删除这个表情包吗宝宝？")) {
                 if (type === 'me') {
                     myStickers.splice(index, 1);
-                    localStorage.setItem('myStickers', JSON.stringify(myStickers));
+                    saveToBackend('myStickers', myStickers);
                 } else {
                     youStickers.splice(index, 1);
-                    localStorage.setItem('youStickers', JSON.stringify(youStickers));
+                    saveToBackend('youStickers', youStickers);
                 }
                 renderStickers();
             }
@@ -1394,46 +1577,74 @@ function renderStickers() {
 
     myStickers.forEach((b64, index) => {
         myGrid.appendChild(createStickerWrapper(b64, 'me', index));
-        let sendImg = document.createElement('img'); sendImg.src = b64; sendImg.className = 'sendable-sticker';
-        sendImg.onclick = () => { addMessageToChat('me', 'img', b64, currentQuoteText); cancelQuote(); document.getElementById('sticker-drawer').classList.remove('active'); };
+        let sendImg = document.createElement('img');
+        sendImg.src = b64;
+        sendImg.className = 'sendable-sticker';
+        sendImg.onclick = () => {
+            addMessageToChat('me', 'img', b64, currentQuoteText);
+            cancelQuote();
+            document.getElementById('sticker-drawer').classList.remove('active');
+        };
         drawer.appendChild(sendImg);
     });
-    
-    youStickers.forEach((b64, index) => { 
-        youGrid.appendChild(createStickerWrapper(b64, 'you', index)); 
+
+    youStickers.forEach((b64, index) => {
+        youGrid.appendChild(createStickerWrapper(b64, 'you', index));
     });
 }
 
-function toggleStickerDrawer() { if(myStickers.length === 0) { alert("表情包为空"); return; } document.getElementById('sticker-drawer').classList.toggle('active'); }
+function toggleStickerDrawer() { if (myStickers.length === 0) { alert("表情包为空"); return; }
+    document.getElementById('sticker-drawer').classList.toggle('active'); }
+
 function uploadSticker(event, person) {
-    const file = event.target.files[0]; if(!file) return;
+    const file = event.target.files[0];
+    if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
-        const img = new Image(); img.onload = () => {
-            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
-            let w = img.width, h = img.height; const max = 150;
-            if(w > max) { h *= max/w; w = max; } if(h > max) { w *= max/h; h = max; }
-            canvas.width = w; canvas.height = h; ctx.drawImage(img, 0, 0, w, h);
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            let w = img.width,
+                h = img.height;
+            const max = 150;
+            if (w > max) { h *= max / w;
+                w = max; }
+            if (h > max) { w *= max / h;
+                h = max; }
+            canvas.width = w;
+            canvas.height = h;
+            ctx.drawImage(img, 0, 0, w, h);
             const compressedB64 = canvas.toDataURL('image/jpeg', 0.7);
-            if(person === 'me') { myStickers.push(compressedB64); localStorage.setItem('myStickers', JSON.stringify(myStickers)); } 
-            else { youStickers.push(compressedB64); localStorage.setItem('youStickers', JSON.stringify(youStickers)); }
+            if (person === 'me') { myStickers.push(compressedB64);
+                saveToBackend('myStickers', myStickers); } else { youStickers.push(compressedB64);
+                saveToBackend('youStickers', youStickers); }
             renderStickers();
-        }; img.src = e.target.result;
-    }; reader.readAsDataURL(file);
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
 }
+
 function changeAvatar(event, person) {
     const file = event.target.files[0];
     if (file) {
         const reader = new FileReader();
         reader.onload = function(e) {
             const imgUrl = `url('${e.target.result}')`;
-            if(person === 'me') { document.documentElement.style.setProperty('--me-avatar', imgUrl); localStorage.setItem('myAvatar', imgUrl); } 
-            else { document.documentElement.style.setProperty('--you-avatar', imgUrl); localStorage.setItem('youAvatar', imgUrl); }
-        }; reader.readAsDataURL(file);
+            if (person === 'me') { document.documentElement.style.setProperty('--me-avatar', imgUrl);
+                localStorage.setItem('myAvatar', imgUrl); } else { document.documentElement.style.setProperty(
+                    '--you-avatar', imgUrl);
+                localStorage.setItem('youAvatar', imgUrl); }
+        };
+        reader.readAsDataURL(file);
     }
 }
+
 function checkStorage() {
     let _lsTotal = 0;
-    for (let _x in localStorage) { if (!localStorage.hasOwnProperty(_x)) continue; _lsTotal += ((localStorage[_x].length + _x.length) * 2); }
-    document.getElementById('storage-info').innerHTML = `缓存占用：${(_lsTotal / 1024).toFixed(2)} KB <br>记录数：${chatHistory.length}/300`;
+    for (let _x in localStorage) { if (!localStorage.hasOwnProperty(_x)) continue; _lsTotal += ((localStorage[_x].length +
+            _x.length) * 2); }
+    document.getElementById('storage-info').innerHTML =
+        `缓存占用：${(_lsTotal / 1024).toFixed(2)} KB <br>记录数：${chatHistory.length}/300`;
 }
