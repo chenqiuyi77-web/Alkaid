@@ -106,6 +106,23 @@ async function loadAllData() {
         tickleSettings = data.tickleSettings || {
             myAction: "拍了拍", mySuffix: "", youAction: "拍了拍", youSuffix: ""
         };
+                // 恢复壁纸和头像
+        if (data.chatWallpaper) {
+            document.getElementById('app').style.backgroundImage = `url('${data.chatWallpaper}')`;
+            localStorage.setItem('chatWallpaper', data.chatWallpaper);
+        }
+        if (data.myAvatar) {
+            document.documentElement.style.setProperty('--me-avatar', `url('${data.myAvatar}')`);
+            localStorage.setItem('myAvatar', data.myAvatar);
+        }
+        if (data.youAvatar) {
+            document.documentElement.style.setProperty('--you-avatar', `url('${data.youAvatar}')`);
+            localStorage.setItem('youAvatar', data.youAvatar);
+        }
+        if (data.theme) {
+            document.documentElement.setAttribute('data-theme', data.theme);
+            localStorage.setItem('theme', data.theme);
+        }
         letterHistory = data.letterHistoryDB || [];
 
         syncToLocalStorage(data);
@@ -565,7 +582,7 @@ function changeWallpaper(event) {
             const compressedB64 = canvas.toDataURL('image/jpeg', 0.6);
 
             document.getElementById('app').style.backgroundImage = `url('${compressedB64}')`;
-            localStorage.setItem('chatWallpaper', compressedB64);
+            saveToBackend('chatWallpaper', compressedB64);
             alert("壁纸更换成功啦宝宝！");
         };
         img.src = e.target.result;
@@ -663,7 +680,7 @@ function updatePartnerNameDisplay(name) {
 
 function setTheme(themeName) {
     document.documentElement.setAttribute('data-theme', themeName);
-    localStorage.setItem('theme', themeName);
+    saveToBackend('theme', themeName);
 }
 
 function changeReplyMode() {
@@ -1633,7 +1650,7 @@ function changeAvatar(event, person) {
         reader.onload = function(e) {
             const imgUrl = `url('${e.target.result}')`;
             if (person === 'me') { document.documentElement.style.setProperty('--me-avatar', imgUrl);
-                localStorage.setItem('myAvatar', imgUrl); } else { document.documentElement.style.setProperty(
+               saveToBackend('myAvatar', imgUrl); } else { document.documentElement.style.setProperty(
                     '--you-avatar', imgUrl);
                 localStorage.setItem('youAvatar', imgUrl); }
         };
