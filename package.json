@@ -1,0 +1,17 @@
+{
+  "name": "alkaid-server",
+  "version": "1.0.0",
+  "description": "Alkaid 后端服务器 - 为你的专属伴侣提供数据持久化存储",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "keywords": ["alkaid", "chat", "backend", "express"],
+  "author": "chenqiuyi77",
+  "license": "MIT"
+}
