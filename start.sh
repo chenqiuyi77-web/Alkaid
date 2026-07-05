@@ -1,19 +1,32 @@
 #!/bin/bash
 
-echo "正在启动 Alkaid 后端服务器..."
+echo "🌙 正在启动 Alkaid..."
 
-# 检查是否安装了 Node.js
-if ! command -v node &> /dev/null; then
-    echo "未安装 Node.js，请先安装"
-    exit 1
+# 进入项目目录
+cd ~/Alkaid
+
+# 启动后端 (Node.js)
+if ! pgrep -f "node server.js" > /dev/null; then
+    echo "🚀 启动后端服务 (端口 3190)..."
+    node server.js &
+    sleep 2
+else
+    echo "✅ 后端已运行"
 fi
 
-# 检查依赖是否已安装
-if [ ! -d "node_modules" ]; then
-    echo "检测到未安装依赖，正在安装..."
-    npm install
+# 启动 Nginx (前端)
+if ! pgrep nginx > /dev/null; then
+    echo "🚀 启动 Nginx (端口 8080)..."
+    nginx
+    sleep 1
+else
+    echo "✅ Nginx 已运行"
 fi
 
-# 启动服务器
-echo "✅ 依赖已就绪，启动中..."
-node server.js
+# 打开浏览器
+echo "🌐 打开浏览器..."
+am start -a android.intent.action.VIEW -d http://localhost:8080
+
+echo "✅ Alkaid 已启动！"
+echo "📍 后端: http://localhost:3190"
+echo "📍 前端: http://localhost:8080"
